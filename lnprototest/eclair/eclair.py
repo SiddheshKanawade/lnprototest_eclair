@@ -3,6 +3,7 @@ import pyln.client
 import pyln.proto.wire
 import lnprototest
 import coincurve
+import socket
 
 from typing import Any, List, Optional
 from lnprototest import (
@@ -15,6 +16,7 @@ from lnprototest import (
     namespace,
     MustNotMsg,
 )
+from contextlib import closing
 
 from pyln.proto.message import (
     Message,
@@ -42,9 +44,23 @@ class Runner(lnprototest.Runner):
         self.rpc = None
         self.bitcoind = None
         self.proc = None
+        self.lightning_port  =self.__reserve()
         # self.bitcoin = pyln.client.Lightning("lightning-rpc")
     
     # Make copy of dummy runner and then try updating it to work with eclair
+    def __reserve(self) -> int:
+        """
+        When python asks for a free port from the os, it is possible that
+        with concurrent access, the port that is picked is a port that is not free
+        anymore when we go to bind the daemon like bitcoind port.
+
+        Source: https://stackoverflow.com/questions/1365265/on-localhost-how-do-i-pick-a-free-port-number
+        """
+        with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
+            s.bind(("", 0))
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            return s.getsockname()[1]
+    
     def get_keyset(self) -> KeySet:
         return KeySet(
             revocation_base_secret="11",
@@ -80,10 +96,8 @@ class Runner(lnprototest.Runner):
             print("[RESTART]")
         self.blockheight = 102
 
-    def connect(self, event: Event, connprivkey: str) -> None:
-        if self.config.getoption("verbose"):
-            print("[CONNECT {} {}]".format(event, connprivkey))
-        self.add_conn(Conn(connprivkey))
+    def connect(self, _: Event, connprivkey: str) -> None:
+        self.add_conn(EclairConn(connprivkey, self.lightning_port))
 
     def getblockheight(self) -> int:
         return self.blockheight
